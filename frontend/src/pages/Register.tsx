@@ -1,20 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { QUARTIERS } from '../types/index.tsx';
 
 export const Register: React.FC = () => {
   const [step, setStep] = useState(1);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
-  const [quartier, setQuartier] = useState('Quartier 1');
+  const [quartier, setQuartier] = useState(QUARTIERS[0]);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
-  const { register, isLoading } = useAuth();
+  const { register, loading } = useAuth();
   const navigate = useNavigate();
-
-  const quartiers = ['Quartier 1', 'Quartier 2', 'Quartier 3', 'Quartier 4', 'Quartier 5', 'Quartier 6', 'Quartier 7', 'Quartier 8', 'Quartier 9', 'Quartier 10'];
 
   const handleNext = () => {
     if (step === 1 && (!firstName || !lastName || !quartier)) {
@@ -37,10 +36,10 @@ export const Register: React.FC = () => {
     e.preventDefault();
     setError('');
     try {
-      await register(firstName, lastName, email, password, quartier);
+      await register({ firstName, lastName, email, password, quartier });
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Erreur lors de l\'inscription');
+      setError(err.response?.data?.error || 'Erreur lors de l\'inscription');
     }
   };
 
@@ -53,7 +52,8 @@ export const Register: React.FC = () => {
         {error && <div className="bg-red-100 text-red-700 p-4 rounded mb-4">{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          {/* Étape 1 */}
+
+          {/* Étape 1 — Identité */}
           {step === 1 && (
             <div className="space-y-4">
               <div>
@@ -64,7 +64,6 @@ export const Register: React.FC = () => {
                   onChange={(e) => setFirstName(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Jean"
-                  required
                 />
               </div>
               <div>
@@ -75,7 +74,6 @@ export const Register: React.FC = () => {
                   onChange={(e) => setLastName(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Dupont"
-                  required
                 />
               </div>
               <div>
@@ -85,7 +83,7 @@ export const Register: React.FC = () => {
                   onChange={(e) => setQuartier(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  {quartiers.map((q) => (
+                  {QUARTIERS.map((q) => (
                     <option key={q} value={q}>{q}</option>
                   ))}
                 </select>
@@ -100,7 +98,7 @@ export const Register: React.FC = () => {
             </div>
           )}
 
-          {/* Étape 2 */}
+          {/* Étape 2 — Email + Mot de passe */}
           {step === 2 && (
             <div className="space-y-4">
               <div>
@@ -111,7 +109,6 @@ export const Register: React.FC = () => {
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="vous@example.com"
-                  required
                 />
               </div>
               <div>
@@ -122,7 +119,6 @@ export const Register: React.FC = () => {
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="••••••••"
-                  required
                 />
               </div>
               <div>
@@ -133,7 +129,6 @@ export const Register: React.FC = () => {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="••••••••"
-                  required
                 />
               </div>
               <div className="flex gap-2">
@@ -155,7 +150,7 @@ export const Register: React.FC = () => {
             </div>
           )}
 
-          {/* Étape 3 - Confirmation */}
+          {/* Étape 3 — Confirmation */}
           {step === 3 && (
             <div className="space-y-4">
               <div className="bg-blue-50 p-4 rounded">
@@ -165,10 +160,10 @@ export const Register: React.FC = () => {
               </div>
               <button
                 type="submit"
-                disabled={isLoading}
+                disabled={loading}
                 className="w-full bg-green-600 text-white font-bold py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
               >
-                {isLoading ? 'Inscription...' : 'Confirmer et rejoindre'}
+                {loading ? 'Inscription...' : 'Confirmer et rejoindre'}
               </button>
               <button
                 type="button"
@@ -179,6 +174,7 @@ export const Register: React.FC = () => {
               </button>
             </div>
           )}
+
         </form>
 
         <p className="text-center text-gray-600 mt-4">

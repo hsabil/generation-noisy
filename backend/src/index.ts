@@ -1,67 +1,136 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import express from 'express'
+import cors from 'cors'
+import dotenv from 'dotenv'
+import { createServer } from 'http'
+import { Server } from 'socket.io'
+import { prisma } from './lib/prisma'
+import authRouter from './routes/auth'
+import servicesRouter from './routes/services'
+import matchesRouter from './routes/matches'
+import ratingsRouter from './routes/ratings'
+import disputesRouter from './routes/disputes'
+import messagesRouter from './routes/messages'
+import notificationsRouter from './routes/notifications'
+import adminRouter from './routes/admin'
 
-dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+dotenv.config()
 
-app.use(cors());
-app.use(express.json());
+const app = express()
+const httpServer = createServer(app)
 
-// Mock database (on utilisera Prisma plus tard)
-const users: any[] = [];
+// ✅ Socket.io avec CORS
+const io = new Server(httpServer, {
+  cors: {
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST'],
+  },
+})
 
-// REGISTER
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { firstName, lastName, email, password, quartier } = req.body;
-    if (!firstName || !lastName || !email || !password || !quartier) {
-      return res.status(400).json({ error: 'Champs manquants' });
-    }
-    const existing = users.find(u => u.email === email);
-    if (existing) {
-      return res.status(409).json({ error: 'Email déjà utilisé' });
-    }
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = { id: Date.now().toString(), firstName, lastName, email, password: hashedPassword, quartier };
-    users.push(user);
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET as string, { expiresIn: '7d' });
-    res.status(201).json({ user: { id: user.id, email: user.email, firstName, lastName }, token });
-  } catch (error) {
-    res.status(500).json({ error: 'Erreur lors de l\'inscription' });
-  }
-});
+const PORT = process.env.PORT || 5000
 
-// LOGIN
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email et mot de passe requis' });
-    }
-    const user = users.find(u => u.email === email);
-    if (!user) {
-      return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
-    }
-    const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return res.status(401).json({ error: 'Email ou mot de passe incorrect' });
-    }
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET as string, { expiresIn: '7d' });
-    res.json({ user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName }, token });
-  } catch (error) {
-    res.status(500).json({ error: 'Erreur lors de la connexion' });
-  }
-});
+// Middlewares
+app.use(cors())
+app.use(express.json())
 
+// Routes HTTP
+app.use('/api/auth', authRouter)
+app.use('/api/services', servicesRouter)
+app.use('/api/matches', matchesRouter)
+app.use('/api/ratings', ratingsRouter)
+app.use('/api/disputes', disputesRouter)
+app.use('/api/messages', messagesRouter)
+app.use('/api/notifications', notificationsRouter)
+app.use('/api/admin', adminRouter)
+
+// Route de santé
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date() });
-});
+  res.json({ status: 'OK', message: 'Serveur Génération Noisy opérationnel' })
+})
 
-app.listen(PORT, () => {
-  console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`);
-});
+// ✅ Socket.io — Gestion du chat en temps réel
+io.on('connection', (socket) => {
+  console.log(`🔌 Utilisateur connecté : ${socket.id}`)
+
+  // Rejoindre une room de match
+  socket.on('join_match', (matchId: string) => {
+    socket.join(matchId)
+    console.log(`👥 Socket ${socket.id} a rejoint le match ${matchId}`)
+  })
+
+  // Quitter une room de match
+  socket.on('leave_match', (matchId: string) => {
+    socket.leave(matchId)
+    console.log(`👋 Socket ${socket.id} a quitté le match ${matchId}`)
+  })
+
+  // Envoyer un message
+  socket.on('send_message', async (data: { matchId: string; senderId: string; content: string }) => {
+    try {
+      const { matchId, senderId, content } = data
+
+      if (!matchId || !senderId || !content) {
+        socket.emit('error', { message: 'Données manquantes' })
+        return
+      }
+
+      // Vérifier que l'utilisateur fait partie du match
+      const match = await prisma.match.findUnique({
+        where: { id: matchId },
+      })
+
+      if (!match) {
+        socket.emit('error', { message: 'Match non trouvé' })
+        return
+      }
+
+      if (match.seekerId !== senderId && match.helperId !== senderId) {
+        socket.emit('error', { message: 'Non autorisé' })
+        return
+      }
+
+      // Sauvegarder le message en base
+      const message = await prisma.message.create({
+        data: { matchId, senderId, content },
+        include: {
+          sender: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              avatar: true,
+            },
+          },
+        },
+      })
+
+      // Notifier l'autre participant
+      const receiverId = senderId === match.seekerId ? match.helperId : match.seekerId
+      await prisma.notification.create({
+        data: {
+          userId: receiverId,
+          type: 'MESSAGE_RECEIVED',
+          title: 'Nouveau message',
+          message: `${message.sender.firstName} vous a envoyé un message`,
+        },
+      })
+
+      // Diffuser le message à tous dans la room
+      io.to(matchId).emit('receive_message', message)
+
+    } catch (error) {
+      console.error('Erreur socket send_message:', error)
+      socket.emit('error', { message: 'Erreur lors de l\'envoi du message' })
+    }
+  })
+
+  socket.on('disconnect', () => {
+    console.log(`🔌 Utilisateur déconnecté : ${socket.id}`)
+  })
+})
+
+// Démarrage du serveur
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`)
+  console.log(`🔌 Socket.io activé`)
+})
